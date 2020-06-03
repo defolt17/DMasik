@@ -49,7 +49,7 @@
     -   Bruh
     -   Goodnight intermission
     -   Stal
+-   ~~ping/pong~~
 -   Code compilation/execution in docker
 -   Post search across SMS
--   If something listed, switch page by reaction arrows
--
+-   If something listed, switch page by emotion arrows

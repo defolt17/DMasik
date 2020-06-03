@@ -18,49 +18,11 @@ import (
 	"github.com/rylio/ytdl"
 )
 
-var (
-	mu             sync.Mutex
-	cc             int = 0
-	IS_PLAYING         = 0
-	IS_NOT_PLAYING     = 0
-)
-
-func incGc() {
-	mu.Lock()
-	cc += 1
-	mu.Unlock()
-}
-func decGc() {
-	mu.Lock()
-	cc -= 1
-	mu.Unlock()
-}
-func getGc() int {
-	mu.Lock()
-	me := cc
-	mu.Unlock()
-	return me
-}
-
-type Voice struct {
-	VoiceConnection *discordgo.VoiceConnection
-	Channel         string
-	Guild           string
-	PlayerStatus    int
-}
-
 type Configuration struct {
 	Token           string `json:"token"`
 	Prefix          string `json:"prefix"`
 	SoundcloudToken string `json:"soundcloud_token"`
 	YoutubeToken    string `json:"youtube_token"`
-}
-
-type Song struct {
-	Link    string
-	Type    string
-	Guild   string
-	Channel string
 }
 
 type SoundcloudResponse struct {
@@ -84,94 +46,9 @@ type ResourceID struct {
 	VideoID string `json:"videoId"`
 }
 
-func main() {
-	discordToken := getDiscordToken()
-	dg, err := discordgo.New("Bot " + discordToken)
-	if err != nil {
-		log.Println("Error creating Discord session,", err)
-		return
-	}
-
-	dg.AddHandler(discordMessageHandler)
-	err = dg.Open()
-	if err != nil {
-		log.Println("Error opening connection,", err)
-		return
-	}
-	stopChannel = make(chan bool)
-
-	fmt.Println("Bot is now running.  Press CTRL-C to exit.")
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
-	<-sc
-
-	dg.Close()
-}
-
-func getDiscordToken() string {
-	err := godotenv.Load(".env")
-	if err != nil {
-		log.Fatalf("Error loading .env file")
-	}
-
-	discordToken := os.Getenv("DISCORD_TOKEN")
-	if discordToken == "" {
-		log.Fatalf("Error, DISCORD_TOKEN in .env not found")
-	}
-	return discordToken
-}
-
-/*
-// TODO: Make it into map['.command'] = func()
-TODO: Make memes commands easily accesible through ".add meme.png meme"
-TODO: Maybe using SQL DB
-*/
 
 func discordMessageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
-	incGc()
-	defer decGc()
-	if m.Author.ID == s.State.User.ID {
-		return
-	}
-	var commandArgs []string = strings.Split(m.Content, " ")
-	channel, err := s.State.Channel(m.ChannelID)
-	if err != nil {
-		fmt.Println(err)
-	}
-	guild, err := s.State.Guild(channel.GuildID)
-	if err != nil {
-		fmt.Println(err)
-	}
-	voiceChannel := findVoiceChannelID(guild, m)
-
-	if m.Content == ".ping" {
-		s.ChannelMessageSend(m.ChannelID, "pong"+"\n Concurrent commands now: "+strconv.Itoa(getGc()))
-	} else if m.Content == ".pong" {
-		s.ChannelMessageSend(m.ChannelID, "ping"+"\n Concurrent commands now: ")
-	} else if m.Content == ".help" {
-		s.ChannelMessageSendEmbed(m.ChannelID, embedExample)
-	} else if m.Content == ".nani" {
-		f, err := os.Open(imageNaniPath)
-		if err != nil {
-			log.Fatalln("Coudn't open", imageNaniPath)
-		}
-		defer f.Close()
-		s.ChannelFileSend(m.ChannelID, "Nani.png", f)
-	} else if m.Content == ".wait" {
-		time.Sleep(time.Second * 10)
-		s.ChannelMessageSend(m.ChannelID, "LOL concurrency baby")
-	} else if m.Content == ".connect" {
-		log.Println("CONNECT play")
-		voiceConnections = append(voiceConnections, connectToVoiceChannel(s, channel.GuildID, voiceChannel))
-	} else if m.Content == ".disconnect" {
-		log.Println("DISCONNECT play")
-		disconnectFromVoiceChannel(channel.GuildID, voiceChannel)
-	} else if commandArgs[0] == ".play" {
-		log.Println("PLAY play")
-		go playAudioFile(sanitizeLink(commandArgs[1]), channel.GuildID, voiceChannel, "web")
-	} else if m.Content == ".stop" {
-		log.Println(stopChannel)
-		stopChannel <- true
+	
 	} else if commandArgs[0] == ".youtube" {
 		log.Println("YOUTUBE play")
 		go playYoutubeLink(sanitizeLink(commandArgs[1]), channel.GuildID, voiceChannel)
@@ -180,46 +57,9 @@ func discordMessageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 		go playSoundcloudLink(sanitizeLink(commandArgs[1]), channel.GuildID, voiceChannel)
 	} else if commandArgs[0] == ".playlist" {
 		go playYoutubePlaylist(commandArgs[1], channel.GuildID, voiceChannel)
-	} else if commandArgs[0] == ".bruh" {
-		go playAudioFile(bruhFilePath, channel.GuildID, voiceChannel, "web")
-	} else if commandArgs[0] == ".giorno" {
-		go playAudioFile(giornoFilePath, channel.GuildID, voiceChannel, "web")
-	} else if commandArgs[0] == ".нуждики" {
-		go playAudioFile(nujdikiFilePath, channel.GuildID, voiceChannel, "web")
-	} else if commandArgs[0] == ".фить" {
-		go playAudioFile(fithaFilePath, channel.GuildID, voiceChannel, "web")
-	} else if commandArgs[0] == ".kira" {
-		go playAudioFile(kiraFilePath, channel.GuildID, voiceChannel, "web")
-	} else if commandArgs[0] == ".808" {
-		if m.Content == ".808 --hard" {
-			go playAudioFile(e0eHardFilePath, channel.GuildID, voiceChannel, "web")
-		} else {
-			go playAudioFile(e0eFilePath, channel.GuildID, voiceChannel, "web")
-		}
-	} else if commandArgs[0] == ".stal" {
-		go playAudioFile(stalFilePath, channel.GuildID, voiceChannel, "web")
-	}
+
 }
 
-func disconnectFromVoiceChannel(guild string, channel string) {
-	for index, voice := range voiceConnections {
-		if voice.Guild == guild {
-			_ = voice.VoiceConnection.Disconnect()
-			stopChannel <- true
-			voiceConnections = append(voiceConnections[:index], voiceConnections[index+1:]...)
-		}
-	}
-}
-
-// This function will sanitize a link that contains < and >, this is used to handle links with
-// disabled embed in Discord
-func sanitizeLink(link string) string {
-
-	// firstTreatment := strings.Replace(link, "<", "", 1)
-	// return strings.Replace(firstTreatment, ">", "", 1)
-
-	return link
-}
 
 // This function is used to extract the id of a playlist given a youtube plaulist link
 func parseYoutubePlaylistLink(link string) string {
