@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -57,6 +57,7 @@ var (
 		"lib":        playLibraryMusic,
 		"skip":       nextSong,
 		"next":       nextSong,
+		"flex":       flex,
 	}
 
 	IS_PLAYING     = 0
@@ -133,6 +134,9 @@ func discordMessageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
+	if strings.ToLower(m.Content) == "да" {
+		s.ChannelMessageSend(m.ChannelID, "П-ворд")
+	}
 	msgIsCommand, command = isCommand(m.Content)
 
 	if msgIsCommand {
@@ -143,11 +147,10 @@ func discordMessageHandler(s *discordgo.Session, m *discordgo.MessageCreate) {
 			function(s, m)
 		} else {
 			log.Println("{", commandArgs[0], "} not in map[string]func")
-			s.ChannelMessage(m.ChannelID, "{ "+commandArgs[0]+" } is not a DMasik function")
+			s.ChannelMessageSend(m.ChannelID, "oWu sowwy but I do not posess such a command, if you would be so kind to contribute to github.com/defolt17/DMasik by adding it or provodong desirable functional.")
 		}
 	} else {
-		log.Println("No prefix. Ignored: {", m.Content, "}")
-		return
+
 	}
 
 }
@@ -274,10 +277,13 @@ func playStalMusic(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 func playAudioFile(file string, guild string, channel string, linkType string) {
 	voiceConnection, index := findVoiceConnection(guild, channel)
-	log.Println(guild, channel)
+
 	switch voiceConnection.PlayerStatus {
 	case IS_NOT_PLAYING:
 		voiceConnections[index].PlayerStatus = IS_PLAYING
+
+		log.Println(file)
+
 		dgvoice.PlayAudioFile(voiceConnection.VoiceConnection, file, stopChannel)
 
 		voiceConnections[index].PlayerStatus = IS_NOT_PLAYING
@@ -330,8 +336,6 @@ func playYoutubeLink(s *discordgo.Session, m *discordgo.MessageCreate) {
 	voiceChannel := findVoiceChannelID(guild, m)
 	audioURL := getYoutubeAudioLink(commandArgs[1])
 
-	log.Println(audioURL)
-
 	go playAudioFile(audioURL, channel.GuildID, voiceChannel, "web")
 
 }
@@ -360,34 +364,81 @@ func playAudioLink(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 func playLibraryMusic(s *discordgo.Session, m *discordgo.MessageCreate) {
 	var musicArr []string
-	var strMusicList string
+	var musicNameArr []string
+	var musicStrList string
+	var c int = 0
+	var musicPath string = "./audio"
+	var itemsPerPage = 10
 
-	files, err := ioutil.ReadDir("./audio")
+	err := filepath.Walk(musicPath,
+		func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if musicPath == path {
+				return nil
+			}
+			musicArr = append(musicArr, path)
+			musicNameArr = append(musicNameArr, info.Name())
+			c++
+			return nil
+		})
 	if err != nil {
-		log.Fatal(err)
-	}
-
-	for i, f := range files {
-		musicArr = append(musicArr, f.Name())
-		strMusicList += strconv.Itoa(i+1) + ") " + f.Name() + "\n"
+		log.Println(err)
 	}
 
 	if len(commandArgs) < 2 {
+		s.ChannelMessageSend(m.ChannelID, "oWu use some sub-command: list, play")
+		return
+
+	} else if commandArgs[1] == "list" {
+		if len(commandArgs) != 3 {
+			s.ChannelMessageSend(m.ChannelID, "OwU sowwy, but youw shouwd pwowide a pwage.")
+			return
+		} else {
+			page, err := strconv.Atoi(commandArgs[2])
+			if err != nil {
+				log.Println(err)
+			}
+			if page < 1 {
+				s.ChannelMessageSend(m.ChannelID, "Libraries list page should be > 0")
+				return
+			}
+			for i := (page - 1) * itemsPerPage; i < (page)*itemsPerPage; i++ {
+				if i+10 > len(musicArr) {
+					for j := i; j < len(musicNameArr); j++ {
+						musicStrList += strconv.Itoa(j) + ") " + musicNameArr[j] + "\n"
+					}
+					break
+				}
+				musicStrList += strconv.Itoa(i+1) + ") " + musicNameArr[i] + "\n"
+			}
+		}
+		if musicStrList == "" {
+			s.ChannelMessageSend(m.ChannelID, "OwU sowwy, but you page is too big for my small music library\n ( ͡° ͜ʖ ͡°).")
+			return
+
+		}
 		embedExample = &discordgo.MessageEmbed{
 			Author:      &discordgo.MessageEmbedAuthor{},
 			Color:       0x000000,
-			Description: strMusicList,
+			Description: musicStrList,
 			Thumbnail: &discordgo.MessageEmbedThumbnail{
 				URL: "https://i.ytimg.com/vi/zI3EHVxS110/maxresdefault.jpg",
 			},
-			Title: "Music Library",
+			Title: "Music Library Page: [" + commandArgs[2] + " / " + strconv.Itoa(int(len(musicNameArr)/itemsPerPage+1)) + "]",
 		}
 
 		_, err = s.ChannelMessageSendEmbed(m.ChannelID, embedExample)
 		if err != nil {
 			log.Println(err)
 		}
+
 	} else if commandArgs[1] == "play" {
+		if len(commandArgs) < 3 {
+			s.ChannelMessageSend(m.ChannelID, "OwU sowwy, but you should provide music index.")
+			return
+		}
 		musicIndex, err := strconv.Atoi(commandArgs[2])
 		if err != nil {
 			log.Println("Error parsing index")
@@ -402,7 +453,8 @@ func playLibraryMusic(s *discordgo.Session, m *discordgo.MessageCreate) {
 			fmt.Println(err)
 		}
 		voiceChannel := findVoiceChannelID(guild, m)
-		playAudioFile("./audio/"+musicArr[musicIndex-1], channel.GuildID, voiceChannel, "web")
+		log.Println("./" + musicArr[musicIndex])
+		playAudioFile("./"+musicArr[musicIndex], channel.GuildID, voiceChannel, "web")
 	}
 
 }
@@ -415,4 +467,11 @@ func nextSong(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 	s.ChannelMessageSend(m.ChannelID, "Nothing to skip!")
 
+}
+
+// TODO: Implement callable queue and sequential playing stuff
+// TODO: Use folders for music listing
+
+func flex(s *discordgo.Session, m *discordgo.MessageCreate) {
+	s.ChannelMessageSend(m.ChannelID, "Ayyy LMAO dats a huge cringe u just wrote bro")
 }
