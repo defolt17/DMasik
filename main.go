@@ -1,10 +1,11 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"github.com/bwmarrin/dgvoice"
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
+	"github.com/rylio/ytdl"
 )
 
 type Voice struct {
@@ -31,13 +33,16 @@ type Song struct {
 	Channel string
 }
 
+const ShellToUse string = "bash"
+
 var (
 	dg               *discordgo.Session
 	stopChannel      chan bool
 	commandArgs      []string
 	voiceConnections []Voice
 	queue            []Song
-	nowPlaying       Song
+
+	nowPlaying Song
 
 	discordPrefix = "."
 	commands      = map[string]func(*discordgo.Session, *discordgo.MessageCreate){
@@ -48,6 +53,8 @@ var (
 		"disconnect": disconnectFromVoiceChannel,
 		"join":       connectToVC,
 		"leave":      disconnectFromVoiceChannel,
+		"j":          connectToVC,
+		"l":          disconnectFromVoiceChannel,
 		"bruh":       playBruhSound,
 		"stal":       playStalMusic,
 		"stop":       stopMusic,
@@ -282,8 +289,6 @@ func playAudioFile(file string, guild string, channel string, linkType string) {
 	case IS_NOT_PLAYING:
 		voiceConnections[index].PlayerStatus = IS_PLAYING
 
-		log.Println(file)
-
 		dgvoice.PlayAudioFile(voiceConnection.VoiceConnection, file, stopChannel)
 
 		voiceConnections[index].PlayerStatus = IS_NOT_PLAYING
@@ -334,19 +339,33 @@ func playYoutubeLink(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	voiceChannel := findVoiceChannelID(guild, m)
-	audioURL := getYoutubeAudioLink(commandArgs[1])
-
-	go playAudioFile(audioURL, channel.GuildID, voiceChannel, "web")
-
-}
-
-func getYoutubeAudioLink(URL string) string {
-	out, err := exec.Command("/usr/bin/youtube-dl", []string{"--get-url", "-f 251", URL}...).Output()
+	audioURL, err := getYoutubeAudioLink(commandArgs[1])
 	if err != nil {
-		log.Fatal(err)
+		s.ChannelMessageSend(m.ChannelID, "uWo sowwy but I couldn't extract audio track from this video")
 	}
 
-	return string(out)
+	go playAudioFile(audioURL, channel.GuildID, voiceChannel, "web")
+}
+
+func getYoutubeAudioLink(URL string) (string, error) {
+
+	video, err := ytdl.GetVideoInfo(context.Background(), URL)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	client := ytdl.Client{}
+
+	for _, format := range video.Formats {
+		if format.AudioEncoding == "opus" || format.AudioEncoding == "aac" || format.AudioEncoding == "vorbis" {
+			data, err := client.GetDownloadURL(context.Background(), video, format)
+			if err != nil {
+				fmt.Println(err)
+			}
+			url := data.String()
+			return url, nil
+		}
+	}
+	return "", errors.New("Coudn't extract audio track from given video")
 }
 
 func playAudioLink(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -359,6 +378,9 @@ func playAudioLink(s *discordgo.Session, m *discordgo.MessageCreate) {
 		fmt.Println(err)
 	}
 	voiceChannel := findVoiceChannelID(guild, m)
+
+	s.ChannelMessageSend(m.ChannelID, commandArgs[1])
+
 	go playAudioFile(commandArgs[1], channel.GuildID, voiceChannel, "web")
 }
 
@@ -473,5 +495,5 @@ func nextSong(s *discordgo.Session, m *discordgo.MessageCreate) {
 // TODO: Use folders for music listing
 
 func flex(s *discordgo.Session, m *discordgo.MessageCreate) {
-	s.ChannelMessageSend(m.ChannelID, "Ayyy LMAO dats a huge cringe u just wrote bro")
+	s.ChannelMessageSend(m.ChannelID, "Ayy LMAO dats a huge cringe u just posted bro")
 }
